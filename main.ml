@@ -50,8 +50,8 @@ and string_of_stmt = function
   | CompStmt(stmt1, stmt2) -> (string_of_stmt stmt1) ^ (string_of_stmt stmt2)
   | AssignStmt(var, exp) -> (string_of_var var) ^ " := " ^ (string_of_exp exp) ^ "\n" 
   | PrintStmt(exp) -> "print(" ^ (string_of_exp exp) ^ ")" ^ "\n" 
-  | IfStmt(exp, stmt1, stmt2) -> "if(" ^ (string_of_exp exp) ^ ")\n" ^ (string_of_stmt stmt1) ^  "else\n" ^ (string_of_stmt stmt2) ^ "end \n"
-  | WhileStmt(exp, s) -> "while(" ^ (string_of_exp exp) ^ ")\n" ^ (string_of_stmt s) ^ "\n" 
+  | IfStmt(exp, stmt1, stmt2) -> "if(" ^ (string_of_exp exp) ^ ")\n" ^ (string_of_stmt stmt1) ^  "else\n" ^ (string_of_stmt stmt2) ^ "end\n"
+  | WhileStmt(exp, s) -> "while(" ^ (string_of_exp exp) ^ ")\n" ^ (string_of_stmt s) ^ "end\n" 
   | NullStmt -> ""
 
  and string_of_program = function
@@ -161,11 +161,12 @@ let succ_of = function
   ;;
 
 
-exception Error;;
+exception ErrorNodeOfStmt;;
+exception ErrorNodeOfDfNode;;
 
 let rec node_of_statement (s: stmt) (nodes: nodeList) =
   match nodes with
-  | [] -> raise Error
+  | [] -> raise ErrorNodeOfStmt
   | n :: tail -> match n with 
                   | Node(st, _, _) -> if s == st then
                                       n
@@ -175,7 +176,8 @@ let rec node_of_statement (s: stmt) (nodes: nodeList) =
 
 let rec dataflowNode_of_node (n: node) (dfNodes: dataflowNode list)=
   match dfNodes with
-    | [] -> raise Error
+    | [] -> raise ErrorNodeOfDfNode
+
     | h :: tail -> match h with
                     | DataFlowNode(nn, _, _) -> if n = nn then 
                                                 h
@@ -183,15 +185,18 @@ let rec dataflowNode_of_node (n: node) (dfNodes: dataflowNode list)=
                                               dataflowNode_of_node n tail
   ;;
 
-let rec cfg_from_ast (currStmt: stmt) (nodes: nodeList) (postStmt: stmt) =
+let rec cfg_from_ast (currStmt: stmt) (postStmt: stmt) =
   match currStmt with
-  | AssignStmt(_, _) -> nodes @ [Node(currStmt, [], [postStmt])]
-  | CompStmt(s1, s2) -> let s2Nodes = cfg_from_ast s2 nodes postStmt in
-                        let s1Nodes = (cfg_from_ast s1 nodes (stmt_of (List.hd s2Nodes))) in
-                            nodes @ s1Nodes @ s2Nodes
+  | AssignStmt(_, _) -> [Node(currStmt, [], [postStmt])]
+  | CompStmt(s1, s2) -> let s2Nodes = cfg_from_ast s2 postStmt in
+                        let s1Nodes = (cfg_from_ast s1 (stmt_of (List.hd s2Nodes))) in
+                            s1Nodes @ s2Nodes
   | IfStmt(_, stmt1, stmt2) -> let ifNode = Node(currStmt, [], [stmt1; stmt2]) in
-                              [ifNode] @ (cfg_from_ast (stmt1) nodes postStmt) @ (cfg_from_ast (stmt2) nodes postStmt)
-  | _ -> nodes
+                              [ifNode] @ (cfg_from_ast (stmt1) postStmt) @ (cfg_from_ast (stmt2) postStmt)
+  | WhileStmt(_, stmt) -> let whileNode = Node(currStmt, [], [stmt; postStmt]) in
+                              [whileNode] @ (cfg_from_ast stmt currStmt)
+  | PrintStmt(_) -> [Node(currStmt, [], [postStmt])]
+  | _ -> []
   ;;
 
 let rec statements_contain (s: stmt) (l: stmt list) = 
@@ -242,9 +247,9 @@ let use (currentNode: node)  =
   match stmt with
     | AssignStmt (_, exp) ->  hasId exp
     | IfStmt (exp, _, _) -> hasId exp
-    | PrintStmt (exp) -> hasId exp
     | WhileStmt (exp, stmt) -> hasId exp
     | PrintStmt (exp) -> hasId exp
+    | _ -> []
 ;;
 
 let print_def (nodes: nodeList) =
@@ -259,7 +264,7 @@ let print_use (nodes: nodeList) =
 
 
 let cfg = match p with
-  | Program(stmt) -> cfg_from_ast stmt [] NullStmt
+  | Program(stmt) -> cfg_from_ast stmt NullStmt
   ;;
 
  let rev list =
@@ -271,7 +276,6 @@ let cfg = match p with
 
 let diff l1 l2 = List.filter (fun x -> not (List.mem x l2)) l1
 ;;
-
 
 let compute_in (node: node) (outList: outN) =
   let defN = gen node [] in
@@ -288,25 +292,22 @@ let compute_out (node: node) (nodes: nodeList) (dfNList: dataflowNode list) =
     List.sort_uniq (fun x y -> compare x y) res
   ;;
 
-
 let rec compute_rec_dataFlow (remaining: nodeList) (allNodes: nodeList) (dfNList: dataflowNode list) =
   match remaining with
-    | [] -> []
+    | [] -> dfNList
     | n :: tl ->  let outVars = compute_out n allNodes dfNList in
                   let newNode = DataFlowNode (n, (compute_in n outVars), outVars) in
-                   [newNode]  @ compute_rec_dataFlow (tl) (allNodes) ([newNode] @ dfNList)
+                   compute_rec_dataFlow (tl) (allNodes) ([newNode] @ dfNList)
 ;;
 
 let compute_initial_dataFlow (nodes: nodeList) = 
-  let backward_nodes = rev nodes in
-  if List.length (backward_nodes) > 0 then
-    let n = List.hd (backward_nodes) in
-    let tl = List.tl (backward_nodes) in
-    let first_dataflow_node = DataFlowNode (n, (compute_in n []), []) in
-     [first_dataflow_node] @  compute_rec_dataFlow (tl) (nodes) ([first_dataflow_node]) 
-  else
-  []
+  let initial = List.filter (fun n -> ((List.length (succ_of n)) == 0)) nodes in
+  let initialDf = List.map (fun n -> DataFlowNode(n, (compute_in n []), [])) in
+    compute_rec_dataFlow (diff nodes initial) (nodes) (initialDf)
 ;;
+
+
+
 
 
 print_string "Program: \n" ;;
