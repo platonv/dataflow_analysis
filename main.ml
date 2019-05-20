@@ -234,7 +234,8 @@ let gen (currentNode: node) (defList: var list) =
   let stmt = stmt_of currentNode in
   match stmt with
     | AssignStmt (var, exp) -> defList @ [var]
-    | _ -> defList ;;
+    | _ -> defList 
+;;
 
 let use (currentNode: node)  =
   let stmt = stmt_of currentNode in
@@ -242,7 +243,9 @@ let use (currentNode: node)  =
     | AssignStmt (_, exp) ->  hasId exp
     | IfStmt (exp, _, _) -> hasId exp
     | PrintStmt (exp) -> hasId exp
-    | WhileStmt (exp, stmt) -> hasId exp;;
+    | WhileStmt (exp, stmt) -> hasId exp
+    | PrintStmt (exp) -> hasId exp
+;;
 
 let print_def (nodes: nodeList) =
   let s = List.map (function | Node(st, p, s) -> (string_of_stmt st)   ^ "GEN:\n" ^ (string_of_var_list (gen (Node(st,p,s)) []))) nodes in
@@ -290,7 +293,7 @@ let rec compute_rec_dataFlow (remaining: nodeList) (allNodes: nodeList) (dfNList
   match remaining with
     | [] -> []
     | n :: tl ->  let outVars = compute_out n allNodes dfNList in
-                  let newNode = DataFlowNode (n, (compute_in n outVars), compute_out n allNodes dfNList) in
+                  let newNode = DataFlowNode (n, (compute_in n outVars), outVars) in
                    [newNode]  @ compute_rec_dataFlow (tl) (allNodes) ([newNode] @ dfNList)
 ;;
 
