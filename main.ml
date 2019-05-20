@@ -48,10 +48,10 @@ and string_of_exp = function
 
 and string_of_stmt = function
   | CompStmt(stmt1, stmt2) -> (string_of_stmt stmt1) ^ (string_of_stmt stmt2)
-  | AssignStmt(var, exp) -> (string_of_var var) ^ " := " ^ (string_of_exp exp) ^ "\n" 
-  | PrintStmt(exp) -> "print(" ^ (string_of_exp exp) ^ ")" ^ "\n" 
-  | IfStmt(exp, stmt1, stmt2) -> "if(" ^ (string_of_exp exp) ^ ")\n" ^ (string_of_stmt stmt1) ^  "else\n" ^ (string_of_stmt stmt2) ^ "end\n"
-  | WhileStmt(exp, s) -> "while(" ^ (string_of_exp exp) ^ ")\n" ^ (string_of_stmt s) ^ "end\n" 
+  | AssignStmt(var, exp) -> (string_of_var var) ^ " := " ^ (string_of_exp exp) ^ "\n"
+  | PrintStmt(exp) -> "print(" ^ (string_of_exp exp) ^ ")" ^ "\n"
+  | IfStmt(exp, stmt1, stmt2) -> "if(" ^ (string_of_exp exp) ^ ")\n" ^ (string_of_stmt stmt1) ^  "else\n" ^ (string_of_stmt stmt2) ^ "end \n"
+  | WhileStmt(exp, s) -> "while(" ^ (string_of_exp exp) ^ ")\n" ^ (string_of_stmt s) ^ "\n"
   | NullStmt -> ""
 
  and string_of_program = function
@@ -89,9 +89,9 @@ let zeqyy = AssignStmt(
 ;;
 
 
-let if1 = IfStmt(
+let if1 = WhileStmt(
    (ArithExp(Sub((Id(Var("x"))), (Id(Var("y")))))),
-   (zeqy),
+   (*(zeqy),*)
    (zeqyy)
 )
 ;;
@@ -105,24 +105,61 @@ let p = Program(CompStmt(
 ))
 ;;
 
-let rec string_of_pred (cfg: stmt list) = 
+let xeqasumb = AssignStmt(
+   (Var("x")),
+   (ArithExp(Add(Id(Var("a")), Id(Var("b")))))
+)
+;;
+
+let yeqamulb = AssignStmt(
+   (Var("y")),
+   (ArithExp(Mul(Id(Var("a")), Id(Var("b")))))
+)
+;;
+
+
+let xeqaminb = AssignStmt(
+   (Var("x")),
+   (ArithExp(Sub(Id(Var("a")), Id(Var("b")))))
+)
+;;
+
+let aeqasum1 = AssignStmt(
+   (Var("a")),
+   (ArithExp(Mul(Id(Var("a")), Number(Const(2))))))
+;;
+let while1 = WhileStmt(
+   (ArithExp(Sub((Id(Var("y"))), (Id(Var("a")))))),
+   (CompStmt (aeqasum1, xeqaminb))
+)
+;;
+
+let p2 = Program (CompStmt (
+  xeqasumb, CompStmt (
+    yeqamulb, while1
+    )
+  ))
+
+
+
+let rec string_of_pred (cfg: stmt list) =
   match cfg with
     | [] -> ""
     | stmt :: tail -> "\t<-" ^ (string_of_stmt stmt) ^ "\n" ^ (string_of_pred tail)
   ;;
 
 
-let rec string_of_succ (cfg: stmt list) = 
+let rec string_of_succ (cfg: stmt list) =
   match cfg with
     | [] -> ""
     | stmt :: tail -> "\t->" ^ (string_of_stmt stmt) ^ "\n" ^ (string_of_succ tail)
   ;;
 
 
-let rec string_of_cfg (cfg: nodeList) = 
+let rec string_of_cfg (cfg: nodeList) =
   match cfg with
     | [] -> ""
-    | Node(stmt, pred, succ) :: tail -> (string_of_pred pred) ^ (string_of_stmt stmt) ^ (string_of_succ succ) ^ (string_of_cfg tail)
+    | Node(stmt, pred, succ) :: tail -> "*************************\n" ^ (string_of_pred pred) ^ (string_of_stmt stmt) ^ (string_of_succ succ) ^ "*************************" ^ (string_of_cfg tail)
   ;;
 
 
@@ -160,46 +197,40 @@ let succ_of = function
   | Node(_, _, s) -> s
   ;;
 
+let pred_of = function
+  | Node(_, _, [NullStmt]) -> []
+  | Node(_, p, _) -> p
+  ;;
 
-exception ErrorNodeOfStmt;;
-exception ErrorNodeOfDfNode;;
+exception Error;;
 
 let rec node_of_statement (s: stmt) (nodes: nodeList) =
   match nodes with
-  | [] -> raise ErrorNodeOfStmt
-  | n :: tail -> match n with 
+  | [] -> raise Error
+  | n :: tail -> match n with
                   | Node(st, _, _) -> if s == st then
                                       n
                                       else
                                       node_of_statement s tail
   ;;
 
-let rec dataflowNode_of_node (n: node) (dfNodes: dataflowNode list)=
-  match dfNodes with
-    | [] -> raise ErrorNodeOfDfNode
-
-    | h :: tail -> match h with
-                    | DataFlowNode(nn, _, _) -> if n = nn then 
-                                                h
-                                              else
-                                              dataflowNode_of_node n tail
-  ;;
-
-let rec cfg_from_ast (currStmt: stmt) (postStmt: stmt) =
+let rec cfg_from_ast (currStmt: stmt) (nodes: nodeList) (postStmt: stmt) =
   match currStmt with
-  | AssignStmt(_, _) -> [Node(currStmt, [], [postStmt])]
-  | CompStmt(s1, s2) -> let s2Nodes = cfg_from_ast s2 postStmt in
-                        let s1Nodes = (cfg_from_ast s1 (stmt_of (List.hd s2Nodes))) in
-                            s1Nodes @ s2Nodes
-  | IfStmt(_, stmt1, stmt2) -> let ifNode = Node(currStmt, [], [stmt1; stmt2]) in
-                              [ifNode] @ (cfg_from_ast (stmt1) postStmt) @ (cfg_from_ast (stmt2) postStmt)
-  | WhileStmt(_, stmt) -> let whileNode = Node(currStmt, [], [stmt; postStmt]) in
-                              [whileNode] @ (cfg_from_ast stmt currStmt)
-  | PrintStmt(_) -> [Node(currStmt, [], [postStmt])]
-  | _ -> []
+  | AssignStmt(_, _) -> nodes @ [Node(currStmt, [], [postStmt])]
+  | CompStmt(s1, s2) -> let s2Nodes = cfg_from_ast s2 nodes postStmt in
+                        let s1Nodes = (cfg_from_ast s1 nodes (stmt_of (List.hd s2Nodes))) in
+                            nodes @ s1Nodes @ s2Nodes
+  | IfStmt(_, stmt1, stmt2) -> let innerCfg1 = cfg_from_ast stmt1 nodes currStmt in
+                               let innerCfg2 = cfg_from_ast stmt2 nodes currStmt in
+                               let ifNode = Node(currStmt, [], [(stmt_of (List.hd innerCfg1)); (stmt_of (List.hd innerCfg2))]) in
+                               [ifNode] @ (innerCfg1 @ innerCfg2)
+  | WhileStmt(_, stmt) -> let innerCfg = cfg_from_ast stmt nodes currStmt in
+                          let whileNode = Node(currStmt, [], [(stmt_of (List.hd innerCfg)); postStmt]) in
+                            [whileNode] @ innerCfg
+  | _ -> nodes
   ;;
 
-let rec statements_contain (s: stmt) (l: stmt list) = 
+let rec statements_contain (s: stmt) (l: stmt list) =
   match l with
   | [] -> false
   | h :: t -> if s = h then
@@ -208,7 +239,7 @@ let rec statements_contain (s: stmt) (l: stmt list) =
               statements_contain s t
   ;;
 
-let rec find_predecessors (s: stmt) (nodes: nodeList) = 
+let rec find_predecessors (s: stmt) (nodes: nodeList) =
   match nodes with
   | [] -> []
   | Node(p, _, succ) :: t -> if statements_contain s succ then
@@ -239,35 +270,34 @@ let gen (currentNode: node) (defList: var list) =
   let stmt = stmt_of currentNode in
   match stmt with
     | AssignStmt (var, exp) -> defList @ [var]
-    | _ -> defList 
-;;
+    | _ -> defList ;;
 
 let use (currentNode: node)  =
   let stmt = stmt_of currentNode in
   match stmt with
     | AssignStmt (_, exp) ->  hasId exp
     | IfStmt (exp, _, _) -> hasId exp
-    | WhileStmt (exp, stmt) -> hasId exp
     | PrintStmt (exp) -> hasId exp
-    | _ -> []
-;;
+    | WhileStmt (exp, stmt) -> hasId exp;;
+
+
 
 let print_def (nodes: nodeList) =
-  let s = List.map (function | Node(st, p, s) -> (string_of_stmt st)   ^ "GEN:\n" ^ (string_of_var_list (gen (Node(st,p,s)) []))) nodes in
+  let s = List.map (function | Node(st, p, s) -> (string_of_stmt st)   ^ "GEN:" ^ (string_of_var_list (gen (Node(st,p,s)) []))) nodes in
   String.concat "\n" s
 ;;
 
 let print_use (nodes: nodeList) =
-  let s = List.map (function | Node(st, p, s) -> (string_of_stmt st)   ^ "USE:\n" ^ (string_of_var_list (use (Node(st,p,s))))) nodes in
+  let s = List.map (function | Node(st, p, s) -> (string_of_stmt st)   ^ "USE:" ^ (string_of_var_list (use (Node(st,p,s))))) nodes in
   String.concat "\n"  s
 ;;
 
 
-let cfg = match p with
-  | Program(stmt) -> cfg_from_ast stmt NullStmt
+let cfg = match p2 with
+  | Program(stmt) -> cfg_from_ast stmt [] NullStmt
   ;;
 
- let rev list =
+let rev list =
   let rec aux acc = function
     | [] -> acc
     | h::t -> aux (h::acc) t in
@@ -277,42 +307,55 @@ let cfg = match p with
 let diff l1 l2 = List.filter (fun x -> not (List.mem x l2)) l1
 ;;
 
-let compute_in (node: node) (outList: outN) =
+let find_start_node (nodes: nodeList) =
+  List.hd (List.filter (fun n -> List.length (pred_of n) == 0) nodes)
+
+
+let rec all_succ_of_node (n: node) (nodes: nodeList) =
+  let succ = succ_of n in
+  let nodes_succ = List.map (fun suc -> node_of_statement suc nodes) succ in
+  nodes_succ @ (List.flatten (List.map (fun n -> (all_succ_of_node n nodes)) nodes_succ))
+;;
+
+let rec compute_in (node: node) (outs: var list) =
   let defN = gen node [] in
   let useN = use node in
-  let res = useN @ (diff outList defN) in
+  let res = useN @ (diff outs defN) in
   List.sort_uniq (fun x y -> compare x y) res
-;;
 
+(*and compute_out (node: node) (nodes: nodeList) =
+  let succ = succ_of node in
+  let nodes_succ = List.map (fun suc -> node_of_statement suc nodes) succ in
 
-let compute_out (node: node) (nodes: nodeList) (dfNList: dataflowNode list) =
-    let succ = succ_of node in 
-    let nodes_succ = List.map (fun suc -> node_of_statement suc nodes) succ in
-    let res = List.flatten (List.map (fun succ -> (in_of_node (dataflowNode_of_node succ dfNList))) nodes_succ) in
-    List.sort_uniq (fun x y -> compare x y) res
+  let res = List.flatten (List.map (fun succ -> (compute_in succ nodes)) nodes_succ) in
+  List.sort_uniq (fun x y -> compare x y) res*)
   ;;
 
-let rec compute_rec_dataFlow (remaining: nodeList) (allNodes: nodeList) (dfNList: dataflowNode list) =
-  match remaining with
-    | [] -> dfNList
-    | n :: tl ->  let outVars = compute_out n allNodes dfNList in
-                  let newNode = DataFlowNode (n, (compute_in n outVars), outVars) in
-                   compute_rec_dataFlow (tl) (allNodes) ([newNode] @ dfNList)
+
+let rec compute_dataFlow (startNode: node) (nodes: nodeList) (visited: nodeList) =
+  let succ = List.filter (fun s -> not (s = NullStmt)) (succ_of startNode) in
+  let nodes_succ = List.map (fun suc -> node_of_statement suc nodes) succ in
+  let fSucc = List.filter (fun suc -> not (List.mem suc visited)) nodes_succ in
+
+  let succ_df = List.map (fun n -> compute_dataFlow n nodes ([startNode] @ visited)) fSucc in
+
+  let succ_ins = List.flatten (List.map (fun n -> in_of_node n) succ_df) in
+
+  let out = succ_ins in
+  let ins = compute_in startNode out in
+
+  DataFlowNode(startNode, ins, out)
 ;;
 
-let compute_initial_dataFlow (nodes: nodeList) = 
-  let initial = List.filter (fun n -> ((List.length (succ_of n)) == 0)) nodes in
-  let initialDf = List.map (fun n -> DataFlowNode(n, (compute_in n []), [])) in
-    compute_rec_dataFlow (diff nodes initial) (nodes) (initialDf)
+let resolve (nodes: nodeList) =
+  let startNode = List.nth nodes 1 in
+  [compute_dataFlow startNode nodes []]
 ;;
-
-
-
 
 
 print_string "Program: \n" ;;
 print_string "----------------------\n" ;;
-print_string (string_of_program p) ;;
+print_string (string_of_program p2) ;;
 print_string "----------------------\n" ;;
 
 print_string "CFG: \n" ;;
@@ -335,5 +378,5 @@ print_string "----------------------\n" ;;
 
 print_string "DF: \n";;
 print_string "----------------------\n" ;;
-print_string (string_of_dataflow_nodes (compute_initial_dataFlow cfg)) ;;
+print_string (string_of_dataflow_nodes (resolve cfg)) ;;
 print_string "----------------------\n" ;;
