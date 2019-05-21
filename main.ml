@@ -89,9 +89,9 @@ let zeqyy = AssignStmt(
 ;;
 
 
-let if1 = WhileStmt(
+let if1 = IfStmt(
    (ArithExp(Sub((Id(Var("x"))), (Id(Var("y")))))),
-   (*(zeqy),*)
+   (zeqy),
    (zeqyy)
 )
 ;;
@@ -203,6 +203,18 @@ let pred_of = function
   ;;
 
 exception Error;;
+exception ErrorNodeOfDfNode;;
+
+let rec dataflowNode_of_node (n: node) (dfNodes: dataflowNode list)=
+  match dfNodes with
+    | [] -> raise ErrorNodeOfDfNode
+
+    | h :: tail -> match h with
+                    | DataFlowNode(nn, _, _) -> if n = nn then
+                                                h
+                                              else
+                                              dataflowNode_of_node n tail
+  ;;
 
 let rec node_of_statement (s: stmt) (nodes: nodeList) =
   match nodes with
@@ -214,20 +226,18 @@ let rec node_of_statement (s: stmt) (nodes: nodeList) =
                                       node_of_statement s tail
   ;;
 
-let rec cfg_from_ast (currStmt: stmt) (nodes: nodeList) (postStmt: stmt) =
+let rec cfg_from_ast (currStmt: stmt) (postStmt: stmt) =
   match currStmt with
-  | AssignStmt(_, _) -> nodes @ [Node(currStmt, [], [postStmt])]
-  | CompStmt(s1, s2) -> let s2Nodes = cfg_from_ast s2 nodes postStmt in
-                        let s1Nodes = (cfg_from_ast s1 nodes (stmt_of (List.hd s2Nodes))) in
-                            nodes @ s1Nodes @ s2Nodes
-  | IfStmt(_, stmt1, stmt2) -> let innerCfg1 = cfg_from_ast stmt1 nodes currStmt in
-                               let innerCfg2 = cfg_from_ast stmt2 nodes currStmt in
-                               let ifNode = Node(currStmt, [], [(stmt_of (List.hd innerCfg1)); (stmt_of (List.hd innerCfg2))]) in
-                               [ifNode] @ (innerCfg1 @ innerCfg2)
-  | WhileStmt(_, stmt) -> let innerCfg = cfg_from_ast stmt nodes currStmt in
-                          let whileNode = Node(currStmt, [], [(stmt_of (List.hd innerCfg)); postStmt]) in
-                            [whileNode] @ innerCfg
-  | _ -> nodes
+  | AssignStmt(_, _) -> [Node(currStmt, [], [postStmt])]
+  | CompStmt(s1, s2) -> let s2Nodes = cfg_from_ast s2 postStmt in
+                        let s1Nodes = (cfg_from_ast s1 (stmt_of (List.hd s2Nodes))) in
+                            s1Nodes @ s2Nodes
+  | IfStmt(_, stmt1, stmt2) -> let ifNode = Node(currStmt, [], [stmt1; stmt2]) in
+                              [ifNode] @ (cfg_from_ast (stmt1) postStmt) @ (cfg_from_ast (stmt2) postStmt)
+  | WhileStmt(_, stmt) -> let whileNode = Node(currStmt, [], [stmt; postStmt]) in
+                              [whileNode] @ (cfg_from_ast stmt currStmt)
+  | PrintStmt(_) -> [Node(currStmt, [], [postStmt])]
+  | _ -> []
   ;;
 
 let rec statements_contain (s: stmt) (l: stmt list) =
@@ -293,8 +303,8 @@ let print_use (nodes: nodeList) =
 ;;
 
 
-let cfg = match p2 with
-  | Program(stmt) -> cfg_from_ast stmt [] NullStmt
+let cfg = match p with
+  | Program(stmt) -> cfg_from_ast stmt NullStmt
   ;;
 
 let rev list =
@@ -317,45 +327,62 @@ let rec all_succ_of_node (n: node) (nodes: nodeList) =
   nodes_succ @ (List.flatten (List.map (fun n -> (all_succ_of_node n nodes)) nodes_succ))
 ;;
 
-let rec compute_in (node: node) (outs: var list) =
+ let rec compute_in (node: node) (outs: var list) =
   let defN = gen node [] in
   let useN = use node in
   let res = useN @ (diff outs defN) in
   List.sort_uniq (fun x y -> compare x y) res
+;;
 
-(*and compute_out (node: node) (nodes: nodeList) =
-  let succ = succ_of node in
-  let nodes_succ = List.map (fun suc -> node_of_statement suc nodes) succ in
 
-  let res = List.flatten (List.map (fun succ -> (compute_in succ nodes)) nodes_succ) in
-  List.sort_uniq (fun x y -> compare x y) res*)
+let compute_out (node: node) (nodes: nodeList) (dfNList: dataflowNode list) =
+    let succ = succ_of node in
+    let nodes_succ = List.map (fun suc -> node_of_statement suc nodes) succ in
+    let res = List.flatten (List.map (fun s -> (in_of_node (dataflowNode_of_node s dfNList))) nodes_succ) in
+    List.sort_uniq (fun x y -> compare x y) res
   ;;
 
-
-let rec compute_dataFlow (startNode: node) (nodes: nodeList) (visited: nodeList) =
-  let succ = List.filter (fun s -> not (s = NullStmt)) (succ_of startNode) in
-  let nodes_succ = List.map (fun suc -> node_of_statement suc nodes) succ in
-  let fSucc = List.filter (fun suc -> not (List.mem suc visited)) nodes_succ in
-
-  let succ_df = List.map (fun n -> compute_dataFlow n nodes ([startNode] @ visited)) fSucc in
-
-  let succ_ins = List.flatten (List.map (fun n -> in_of_node n) succ_df) in
-
-  let out = succ_ins in
-  let ins = compute_in startNode out in
-
-  DataFlowNode(startNode, ins, out)
+let rec replaceNode (newNode: dataflowNode) (allDfNodes: dataflowNode list) = 
+    match allDfNodes with
+      | [] -> []
+      | h :: tl -> if (node_of_dfNode h) == (node_of_dfNode newNode) then
+                      newNode :: tl
+                    else
+                      h :: replaceNode newNode tl
 ;;
 
-let resolve (nodes: nodeList) =
-  let startNode = List.nth nodes 1 in
-  [compute_dataFlow startNode nodes []]
+
+
+let rec whileLoop  (workList: dataflowNode list) (nodes: nodeList) (allDfNodes: dataflowNode list) = 
+  match workList with
+    | [] -> allDfNodes
+    | h :: t -> let outs = compute_out (node_of_dfNode h) nodes allDfNodes in
+                let ins = compute_in (node_of_dfNode h) outs in
+                let newNode = DataFlowNode((node_of_dfNode h), ins @ (in_of_node h), outs @ (out_of_node h)) in
+                if ins <> in_of_node h then
+                  let prevs = pred_of (node_of_dfNode h) in
+                  let nodes_prev = List.map (fun p -> node_of_statement p nodes) prevs in
+                  let res = List.map (fun p -> (dataflowNode_of_node p allDfNodes)) nodes_prev in
+                  whileLoop (t @ res) (nodes) (replaceNode newNode allDfNodes)
+                else
+                  whileLoop t nodes (replaceNode newNode allDfNodes)
+                ;;
+
+let backwardDataflow (nodes: nodeList) =
+  let dfNodes = List.map (fun n -> DataFlowNode(n, [], [])) nodes in
+  let initial = List.filter (fun n -> ((List.length (succ_of n)) == 0)) nodes in
+  let initialDf = List.map (fun n -> DataFlowNode(n, (use n), [])) initial in
+  let df = List.flatten (List.map (fun n-> replaceNode n dfNodes) initialDf) in
+  let workList = List.filter (fun n -> (List.length (succ_of (node_of_dfNode n)) <> 0)) dfNodes in
+   whileLoop workList nodes df
 ;;
+
+
 
 
 print_string "Program: \n" ;;
 print_string "----------------------\n" ;;
-print_string (string_of_program p2) ;;
+print_string (string_of_program p) ;;
 print_string "----------------------\n" ;;
 
 print_string "CFG: \n" ;;
@@ -378,5 +405,5 @@ print_string "----------------------\n" ;;
 
 print_string "DF: \n";;
 print_string "----------------------\n" ;;
-print_string (string_of_dataflow_nodes (resolve cfg)) ;;
+print_string (string_of_dataflow_nodes (backwardDataflow cfg)) ;;
 print_string "----------------------\n" ;;
