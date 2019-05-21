@@ -52,7 +52,7 @@ and string_of_stmt = function
   | PrintStmt(exp) -> "print(" ^ (string_of_exp exp) ^ ")" ^ "\n"
   | IfStmt(exp, stmt1, stmt2) -> "if(" ^ (string_of_exp exp) ^ ")\n" ^ (string_of_stmt stmt1) ^  "else\n" ^ (string_of_stmt stmt2) ^ "end \n"
   | WhileStmt(exp, s) -> "while(" ^ (string_of_exp exp) ^ ")\n" ^ (string_of_stmt s) ^ "\n"
-  | NullStmt -> ""
+  | NullStmt -> "NullStmt"
 
  and string_of_program = function
   |  Program stmt -> string_of_stmt stmt
@@ -193,7 +193,6 @@ let rec string_of_dataflow_nodes (nodes: dataflowNode list) =
   ;;
 
 let succ_of = function
-  | Node(_, _, [NullStmt]) -> []
   | Node(_, _, s) -> s
   ;;
 
@@ -243,11 +242,12 @@ let rec cfg_from_ast (currStmt: stmt) (postStmt: stmt) =
 let rec statements_contain (s: stmt) (l: stmt list) =
   match l with
   | [] -> false
-  | h :: t -> if s = h then
+  | h :: t -> if s == h then
               true
               else
               statements_contain s t
   ;;
+
 
 let rec find_predecessors (s: stmt) (nodes: nodeList) =
   match nodes with
@@ -303,7 +303,8 @@ let print_use (nodes: nodeList) =
 ;;
 
 
-let cfg = match p with
+let cfg (p: prg) =
+  match p with
   | Program(stmt) -> cfg_from_ast stmt NullStmt
   ;;
 
@@ -342,7 +343,7 @@ let compute_out (node: node) (nodes: nodeList) (dfNList: dataflowNode list) =
     List.sort_uniq (fun x y -> compare x y) res
   ;;
 
-let rec replaceNode (newNode: dataflowNode) (allDfNodes: dataflowNode list) = 
+let rec replaceNode (newNode: dataflowNode) (allDfNodes: dataflowNode list) =
     match allDfNodes with
       | [] -> []
       | h :: tl -> if (node_of_dfNode h) == (node_of_dfNode newNode) then
@@ -353,12 +354,16 @@ let rec replaceNode (newNode: dataflowNode) (allDfNodes: dataflowNode list) =
 
 
 
-let rec whileLoop  (workList: dataflowNode list) (nodes: nodeList) (allDfNodes: dataflowNode list) = 
+let rec whileLoop  (workList: dataflowNode list) (nodes: nodeList) (allDfNodes: dataflowNode list) =
   match workList with
     | [] -> allDfNodes
     | h :: t -> let outs = compute_out (node_of_dfNode h) nodes allDfNodes in
                 let ins = compute_in (node_of_dfNode h) outs in
-                let newNode = DataFlowNode((node_of_dfNode h), ins @ (in_of_node h), outs @ (out_of_node h)) in
+                let concat_ins = ins @ (in_of_node h) in
+                let concat_outs = outs @ (out_of_node h) in
+                let final_ins = List.sort_uniq (fun x y -> compare x y) (ins @ (in_of_node h)) in
+                let final_outs = List.sort_uniq (fun x y -> compare x y) (outs @ (out_of_node h)) in
+                let newNode = DataFlowNode((node_of_dfNode h), final_ins, final_outs) in
                 if ins <> in_of_node h then
                   let prevs = pred_of (node_of_dfNode h) in
                   let nodes_prev = List.map (fun p -> node_of_statement p nodes) prevs in
@@ -370,40 +375,44 @@ let rec whileLoop  (workList: dataflowNode list) (nodes: nodeList) (allDfNodes: 
 
 let backwardDataflow (nodes: nodeList) =
   let dfNodes = List.map (fun n -> DataFlowNode(n, [], [])) nodes in
-  let initial = List.filter (fun n -> ((List.length (succ_of n)) == 0)) nodes in
-  let initialDf = List.map (fun n -> DataFlowNode(n, (use n), [])) initial in
+  let initial = List.filter (fun n -> statements_contain NullStmt (succ_of n)) nodes in
+  let initialDf = List.map (fun n -> DataFlowNode(n, (compute_in n []), [])) initial in
   let df = List.flatten (List.map (fun n-> replaceNode n dfNodes) initialDf) in
-  let workList = List.filter (fun n -> (List.length (succ_of (node_of_dfNode n)) <> 0)) dfNodes in
-   whileLoop workList nodes df
-;;
+  let workList = (diff df initialDf) in
+    whileLoop workList nodes df
+  ;;
 
 
 
+
+
+
+let final_cfg = (proc (cfg p2));;
 
 print_string "Program: \n" ;;
 print_string "----------------------\n" ;;
-print_string (string_of_program p) ;;
+print_string (string_of_program p2) ;;
 print_string "----------------------\n" ;;
 
 print_string "CFG: \n" ;;
 print_string "----------------------\n" ;;
-print_string (string_of_cfg (proc cfg)) ;;
+print_string (string_of_cfg final_cfg) ;;
 print_string "----------------------\n" ;;
 
-let cfg = proc cfg;;
-
+(* let cfg = proc cfg p;;
+ *)
 print_string "GEN: \n";;
 print_string "----------------------\n" ;;
-print_string (print_def (proc cfg)) ;;
+print_string (print_def final_cfg) ;;
 print_string "----------------------\n" ;;
 
 
 print_string "USE: \n";;
 print_string "----------------------\n" ;;
-print_string (print_use (proc cfg)) ;;
+print_string (print_use final_cfg) ;;
 print_string "----------------------\n" ;;
 
 print_string "DF: \n";;
 print_string "----------------------\n" ;;
-print_string (string_of_dataflow_nodes (backwardDataflow cfg)) ;;
+print_string (string_of_dataflow_nodes (backwardDataflow final_cfg)) ;;
 print_string "----------------------\n" ;;
