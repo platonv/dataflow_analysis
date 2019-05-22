@@ -196,8 +196,18 @@ let succ_of = function
   | Node(_, _, s) -> s
   ;;
 
+(* let rec containsNull (stmts: stmt list) = 
+  match stms with
+    | [] -> false
+    | NullStmt :: t -> true
+    | _ :: t -> containsNull NullStmt
+  ;; *)
+
+let diff l1 l2 = List.filter (fun x -> not (List.mem x l2)) l1
+;;
+
+
 let pred_of = function
-  | Node(_, _, [NullStmt]) -> []
   | Node(_, p, _) -> p
   ;;
 
@@ -231,28 +241,26 @@ let rec cfg_from_ast (currStmt: stmt) (postStmt: stmt) =
   | CompStmt(s1, s2) -> let s2Nodes = cfg_from_ast s2 postStmt in
                         let s1Nodes = (cfg_from_ast s1 (stmt_of (List.hd s2Nodes))) in
                             s1Nodes @ s2Nodes
-  | IfStmt(_, stmt1, stmt2) -> let ifNode = Node(currStmt, [], [stmt1; stmt2]) in
-                              [ifNode] @ (cfg_from_ast (stmt1) postStmt) @ (cfg_from_ast (stmt2) postStmt)
-  | WhileStmt(_, stmt) -> let whileNode = Node(currStmt, [], [stmt; postStmt]) in
-                              [whileNode] @ (cfg_from_ast stmt currStmt)
+  | IfStmt(_, stmt1, stmt2) -> let stmtCfg1 = cfg_from_ast stmt1 currStmt in
+                              let stmtCfg2 = cfg_from_ast stmt2 currStmt in
+                              let ifNode = Node(currStmt, [], [stmt_of (List.hd stmtCfg1); stmt_of (List.hd stmtCfg2)]) in
+                              [ifNode] @ stmtCfg1 @ stmtCfg2
+  | WhileStmt(_, stmt) -> let stmtCfg = cfg_from_ast stmt currStmt in
+                          let whileNode = Node(currStmt, [], [stmt_of (List.hd stmtCfg); postStmt]) in
+                              [whileNode] @ stmtCfg
   | PrintStmt(_) -> [Node(currStmt, [], [postStmt])]
   | _ -> []
   ;;
 
 let rec statements_contain (s: stmt) (l: stmt list) =
-  match l with
-  | [] -> false
-  | h :: t -> if s == h then
-              true
-              else
-              statements_contain s t
+  List.mem s l
   ;;
 
 
 let rec find_predecessors (s: stmt) (nodes: nodeList) =
   match nodes with
   | [] -> []
-  | Node(p, _, succ) :: t -> if statements_contain s succ then
+  | Node(p, _, succ) :: t -> if List.mem s succ then
                              [p] @ (find_predecessors s t)
                              else
                              find_predecessors s t
@@ -276,13 +284,13 @@ and hasId = function
 
 
 
-let gen (currentNode: node) (defList: var list) =
+let kill (currentNode: node) (defList: var list) =
   let stmt = stmt_of currentNode in
   match stmt with
     | AssignStmt (var, exp) -> defList @ [var]
     | _ -> defList ;;
 
-let use (currentNode: node)  =
+let gen (currentNode: node)  =
   let stmt = stmt_of currentNode in
   match stmt with
     | AssignStmt (_, exp) ->  hasId exp
@@ -292,13 +300,13 @@ let use (currentNode: node)  =
 
 
 
-let print_def (nodes: nodeList) =
-  let s = List.map (function | Node(st, p, s) -> (string_of_stmt st)   ^ "GEN:" ^ (string_of_var_list (gen (Node(st,p,s)) []))) nodes in
+let print_kill (nodes: nodeList) =
+  let s = List.map (function | Node(st, p, s) -> (string_of_stmt st)   ^ "KILL:" ^ (string_of_var_list (kill (Node(st,p,s)) []))) nodes in
   String.concat "\n" s
 ;;
 
-let print_use (nodes: nodeList) =
-  let s = List.map (function | Node(st, p, s) -> (string_of_stmt st)   ^ "USE:" ^ (string_of_var_list (use (Node(st,p,s))))) nodes in
+let print_gen (nodes: nodeList) =
+  let s = List.map (function | Node(st, p, s) -> (string_of_stmt st)   ^ "GEN:" ^ (string_of_var_list (gen (Node(st,p,s))))) nodes in
   String.concat "\n"  s
 ;;
 
@@ -315,8 +323,6 @@ let rev list =
   aux [] list
   ;;
 
-let diff l1 l2 = List.filter (fun x -> not (List.mem x l2)) l1
-;;
 
 let find_start_node (nodes: nodeList) =
   List.hd (List.filter (fun n -> List.length (pred_of n) == 0) nodes)
@@ -329,15 +335,15 @@ let rec all_succ_of_node (n: node) (nodes: nodeList) =
 ;;
 
  let rec compute_in (node: node) (outs: var list) =
-  let defN = gen node [] in
-  let useN = use node in
-  let res = useN @ (diff outs defN) in
+  let killN = kill node [] in
+  let genN = gen node in
+  let res = genN @ (diff outs killN) in
   List.sort_uniq (fun x y -> compare x y) res
 ;;
 
 
 let compute_out (node: node) (nodes: nodeList) (dfNList: dataflowNode list) =
-    let succ = succ_of node in
+    let succ = (diff (succ_of node) [NullStmt])  in
     let nodes_succ = List.map (fun suc -> node_of_statement suc nodes) succ in
     let res = List.flatten (List.map (fun s -> (in_of_node (dataflowNode_of_node s dfNList))) nodes_succ) in
     List.sort_uniq (fun x y -> compare x y) res
@@ -353,14 +359,11 @@ let rec replaceNode (newNode: dataflowNode) (allDfNodes: dataflowNode list) =
 ;;
 
 
-
 let rec whileLoop  (workList: dataflowNode list) (nodes: nodeList) (allDfNodes: dataflowNode list) =
   match workList with
     | [] -> allDfNodes
     | h :: t -> let outs = compute_out (node_of_dfNode h) nodes allDfNodes in
                 let ins = compute_in (node_of_dfNode h) outs in
-                let concat_ins = ins @ (in_of_node h) in
-                let concat_outs = outs @ (out_of_node h) in
                 let final_ins = List.sort_uniq (fun x y -> compare x y) (ins @ (in_of_node h)) in
                 let final_outs = List.sort_uniq (fun x y -> compare x y) (outs @ (out_of_node h)) in
                 let newNode = DataFlowNode((node_of_dfNode h), final_ins, final_outs) in
@@ -387,11 +390,11 @@ let backwardDataflow (nodes: nodeList) =
 
 
 
-let final_cfg = (proc (cfg p2));;
+let final_cfg = (proc (cfg p));;
 
 print_string "Program: \n" ;;
 print_string "----------------------\n" ;;
-print_string (string_of_program p2) ;;
+print_string (string_of_program p) ;;
 print_string "----------------------\n" ;;
 
 print_string "CFG: \n" ;;
@@ -401,15 +404,15 @@ print_string "----------------------\n" ;;
 
 (* let cfg = proc cfg p;;
  *)
+print_string "kill: \n";;
+print_string "----------------------\n" ;;
+print_string (print_kill final_cfg) ;;
+print_string "----------------------\n" ;;
+
+
 print_string "GEN: \n";;
 print_string "----------------------\n" ;;
-print_string (print_def final_cfg) ;;
-print_string "----------------------\n" ;;
-
-
-print_string "USE: \n";;
-print_string "----------------------\n" ;;
-print_string (print_use final_cfg) ;;
+print_string (print_gen final_cfg) ;;
 print_string "----------------------\n" ;;
 
 print_string "DF: \n";;
