@@ -208,7 +208,7 @@ let rec string_of_succ (cfg: stmt list) =
 let rec string_of_cfg (cfg: nodeList) = 
   match cfg with
     | [] -> ""
-    | Node(stmt, pred, succ) :: tail ->  "\nNode: " ^ (string_of_stmt_one stmt) ^ "\tPred:\n" ^ (string_of_pred pred) ^ "\tSucc:\n" ^ (string_of_succ succ) ^ (string_of_cfg tail)
+    | Node(stmt, pred, succ) :: tail ->  "\n" ^ (string_of_stmt_one stmt) ^ "\tPred:\n" ^ (string_of_pred pred) ^ "\tSucc:\n" ^ (string_of_succ succ) ^ (string_of_cfg tail)
   ;;
 
 let live_variables = function
@@ -227,7 +227,7 @@ let rec string_of_res (cfg: nodeList) (dataflow: dataflowNode list) =
       let dfNode = dataflowNode_of_node (Node(stmt, pred, succ)) dataflow in
       let liveVariables = live_variables dfNode in
       (string_of_stmt_one stmt) ^
-       "live: {" ^ (string_of_var_list liveVariables) ^ "}\n\n"
+       "\tLIVE: {" ^ (string_of_var_list liveVariables) ^ "}\n\n"
        ^ (string_of_res tail dataflow)
   ;;
 
@@ -351,12 +351,12 @@ let gen (currentNode: node)  =
 
 
 let print_kill (nodes: nodeList) =
-  let s = List.map (function | Node(st, p, s) -> (string_of_stmt_one st)   ^ "KILL: {" ^ (string_of_var_list (kill (Node(st,p,s)) [])) ^ "}\n") nodes in
+  let s = List.map (function | Node(st, p, s) -> (string_of_stmt_one st)   ^ "\tKILL: {" ^ (string_of_var_list (kill (Node(st,p,s)) [])) ^ "}\n") nodes in
   (String.concat "\n" s) ^ "\n"
 ;;
 
 let print_gen (nodes: nodeList) =
-  let s = List.map (function | Node(st, p, s) -> (string_of_stmt_one st)   ^ "GEN: {" ^ (string_of_var_list (gen (Node(st,p,s)))) ^ "}\n") nodes in
+  let s = List.map (function | Node(st, p, s) -> (string_of_stmt_one st)   ^ "\tGEN: {" ^ (string_of_var_list (gen (Node(st,p,s)))) ^ "}\n") nodes in
   (String.concat "\n"  s) ^ "\n"
 ;;
 
