@@ -29,6 +29,9 @@ and outN = var list
 and dataflowNode = DataFlowNode of node * inN * outN
 ;;
 
+exception Error;;
+exception ErrorNodeOfDfNode;;
+
 let rec string_of_var = function
   | Var (s) -> s
 
@@ -46,17 +49,54 @@ and string_of_exp = function
   | Id (v) -> (string_of_var v) ;
   | ArithExp (exp) -> (string_of_arithExp exp);
 
-and string_of_stmt = function
-  | CompStmt(stmt1, stmt2) -> (string_of_stmt stmt1) ^ (string_of_stmt stmt2)
-  | AssignStmt(var, exp) -> (string_of_var var) ^ " := " ^ (string_of_exp exp) ^ "\n"
-  | PrintStmt(exp) -> "print(" ^ (string_of_exp exp) ^ ")" ^ "\n"
-  | IfStmt(exp, stmt1, stmt2) -> "if(" ^ (string_of_exp exp) ^ ")\n" ^ (string_of_stmt stmt1) ^  "else\n" ^ (string_of_stmt stmt2) ^ "end \n"
-  | WhileStmt(exp, s) -> "while(" ^ (string_of_exp exp) ^ ")\n" ^ (string_of_stmt s) ^ "\n"
-  | NullStmt -> "NullStmt"
+and repeat (s: string) (n: int) = 
+  if n > 0 then s ^ (repeat s (n - 1)) else ""
 
- and string_of_program = function
-  |  Program stmt -> string_of_stmt stmt
-  ;;
+and string_of_stmt_orig (lvl: int) (s: stmt) = match s with
+  | CompStmt(stmt1, stmt2) -> (string_of_stmt_orig lvl stmt1) ^ 
+                              (string_of_stmt_orig lvl stmt2)
+  | AssignStmt(var, exp) -> (repeat "\t" lvl) ^
+                            (string_of_var var) ^ 
+                            " := " ^
+                            (string_of_exp exp) ^
+                            "\n" 
+  | PrintStmt(exp) -> (repeat "\t" lvl) ^ 
+                      "print(" ^ 
+                      (string_of_exp exp) ^ 
+                      ")" ^ 
+                      "\n" 
+  | IfStmt(exp, stmt1, stmt2) -> (repeat "\t" lvl) ^ 
+                                 "if(" ^ 
+                                 (string_of_exp exp) ^ 
+                                 ")\n" ^ 
+                                 (string_of_stmt_orig (lvl + 1) stmt1) ^  
+                                 "else\n" ^ 
+                                 (string_of_stmt_orig (lvl + 1) stmt2) ^ 
+                                 (repeat "\t" lvl) ^ 
+                                 "end\n"
+  | WhileStmt(exp, s) -> (repeat "\t" lvl) ^ 
+                          "while(" ^ 
+                          (string_of_exp exp) ^ 
+                          ")\n" ^ 
+                          (string_of_stmt_orig (lvl + 1) s) ^ 
+                          (repeat "\t" lvl) ^ 
+                          "end\n" 
+  | NullStmt -> ""
+
+and string_of_stmt_one (s: stmt) = match s with
+  | AssignStmt(var, exp) -> (string_of_var var) ^ " := " ^ (string_of_exp exp) ^ "\n" 
+  | PrintStmt(exp) -> "print(" ^ (string_of_exp exp) ^ ")" ^ "\n" 
+  | IfStmt(exp, stmt1, stmt2) -> "if(" ^ (string_of_exp exp) ^ ")\n"
+  | WhileStmt(exp, s) -> "while(" ^ (string_of_exp exp) ^ ")\n"
+  | CompStmt(stmt1, stmt2) -> ""
+  | NullStmt -> "exit \n"
+;;
+
+let string_of_stmt = (string_of_stmt_orig 0);;
+
+let string_of_program = function
+|  Program stmt -> string_of_stmt stmt
+;;
 
 let yeq4 = AssignStmt(
    (Var("y")),
@@ -140,33 +180,55 @@ let p2 = Program (CompStmt (
     )
   ))
 
+let rec dataflowNode_of_node (n: node) (dfNodes: dataflowNode list)=
+  match dfNodes with
+    | [] -> raise ErrorNodeOfDfNode
+    | h :: tail -> match h with
+                    | DataFlowNode(nn, _, _) -> if n = nn then
+                                                h
+                                              else
+                                              dataflowNode_of_node n tail
+  ;;
+
 
 
 let rec string_of_pred (cfg: stmt list) =
   match cfg with
     | [] -> ""
-    | stmt :: tail -> "\t<-" ^ (string_of_stmt stmt) ^ "\n" ^ (string_of_pred tail)
+    | stmt :: tail -> "\t\t" ^ (string_of_stmt_one stmt) ^  (string_of_pred tail)
   ;;
 
 
 let rec string_of_succ (cfg: stmt list) =
   match cfg with
     | [] -> ""
-    | stmt :: tail -> "\t->" ^ (string_of_stmt stmt) ^ "\n" ^ (string_of_succ tail)
+    | stmt :: tail -> "\t\t" ^ (string_of_stmt_one stmt) ^  (string_of_succ tail)
   ;;
 
-
-let rec string_of_cfg (cfg: nodeList) =
+let rec string_of_cfg (cfg: nodeList) = 
   match cfg with
     | [] -> ""
-    | Node(stmt, pred, succ) :: tail -> "*************************\n" ^ (string_of_pred pred) ^ (string_of_stmt stmt) ^ (string_of_succ succ) ^ "*************************" ^ (string_of_cfg tail)
+    | Node(stmt, pred, succ) :: tail ->  "\nNode: " ^ (string_of_stmt_one stmt) ^ "\tPred:\n" ^ (string_of_pred pred) ^ "\tSucc:\n" ^ (string_of_succ succ) ^ (string_of_cfg tail)
   ;;
 
+let live_variables = function
+  | DataFlowNode(_, ins, out) -> List.sort_uniq (fun x y -> compare x y) (ins @ out)
+  ;;
 
-let rec string_of_var_list (use_vars: var list) =
-  match use_vars with
+let rec string_of_var_list (vars: var list) =
+  String.concat ", " (List.map (fun v -> string_of_var v) vars)
+;;
+
+
+let rec string_of_res (cfg: nodeList) (dataflow: dataflowNode list) = 
+  match cfg with
     | [] -> ""
-    | v :: tail -> "~~~~" ^ (string_of_var v) ^ "\n" ^ string_of_var_list tail
+    | Node(stmt, pred, succ) :: tail ->  
+      let dfNode = dataflowNode_of_node (Node(stmt, pred, succ)) dataflow in
+      let liveVariables = live_variables dfNode in
+      (string_of_stmt_one stmt) ^
+       "live: {" ^ (string_of_var_list liveVariables) ^ "}\n\n"
+       ^ (string_of_res tail dataflow)
   ;;
 
 let in_of_node = function
@@ -187,9 +249,9 @@ let stmt_of = function
 
 let rec string_of_dataflow_nodes (nodes: dataflowNode list) =
   let s = List.map (fun n ->
-    (string_of_stmt (stmt_of (node_of_dfNode n))) ^ "\nIN:\n" ^ string_of_var_list (in_of_node n) ^ "\nOUT:\n" ^ string_of_var_list (out_of_node n)
+    (string_of_stmt_one (stmt_of (node_of_dfNode n))) ^ "\tIN: {" ^ string_of_var_list (in_of_node n) ^ "} \n\tOUT: {" ^ string_of_var_list (out_of_node n) ^ "}"
   ) nodes in
-  String.concat "\n" s
+  (String.concat "\n\n" s) ^ "\n"
   ;;
 
 let succ_of = function
@@ -211,19 +273,6 @@ let pred_of = function
   | Node(_, p, _) -> p
   ;;
 
-exception Error;;
-exception ErrorNodeOfDfNode;;
-
-let rec dataflowNode_of_node (n: node) (dfNodes: dataflowNode list)=
-  match dfNodes with
-    | [] -> raise ErrorNodeOfDfNode
-
-    | h :: tail -> match h with
-                    | DataFlowNode(nn, _, _) -> if n = nn then
-                                                h
-                                              else
-                                              dataflowNode_of_node n tail
-  ;;
 
 let rec node_of_statement (s: stmt) (nodes: nodeList) =
   match nodes with
@@ -241,10 +290,8 @@ let rec cfg_from_ast (currStmt: stmt) (postStmt: stmt) =
   | CompStmt(s1, s2) -> let s2Nodes = cfg_from_ast s2 postStmt in
                         let s1Nodes = (cfg_from_ast s1 (stmt_of (List.hd s2Nodes))) in
                             s1Nodes @ s2Nodes
-  | IfStmt(_, stmt1, stmt2) -> let stmtCfg1 = cfg_from_ast stmt1 currStmt in
-                              let stmtCfg2 = cfg_from_ast stmt2 currStmt in
-                              let ifNode = Node(currStmt, [], [stmt_of (List.hd stmtCfg1); stmt_of (List.hd stmtCfg2)]) in
-                              [ifNode] @ stmtCfg1 @ stmtCfg2
+  | IfStmt(_, stmt1, stmt2) -> let ifNode = Node(currStmt, [], [stmt1; stmt2]) in
+                              [ifNode] @ (cfg_from_ast (stmt1) postStmt) @ (cfg_from_ast (stmt2) postStmt)
   | WhileStmt(_, stmt) -> let stmtCfg = cfg_from_ast stmt currStmt in
                           let whileNode = Node(currStmt, [], [stmt_of (List.hd stmtCfg); postStmt]) in
                               [whileNode] @ stmtCfg
@@ -296,18 +343,21 @@ let gen (currentNode: node)  =
     | AssignStmt (_, exp) ->  hasId exp
     | IfStmt (exp, _, _) -> hasId exp
     | PrintStmt (exp) -> hasId exp
-    | WhileStmt (exp, stmt) -> hasId exp;;
+    | WhileStmt (exp, stmt) -> hasId exp
+    | NullStmt -> raise Error 
+    | CompStmt(_,_) -> raise Error
+  ;;
 
 
 
 let print_kill (nodes: nodeList) =
-  let s = List.map (function | Node(st, p, s) -> (string_of_stmt st)   ^ "KILL:" ^ (string_of_var_list (kill (Node(st,p,s)) []))) nodes in
-  String.concat "\n" s
+  let s = List.map (function | Node(st, p, s) -> (string_of_stmt_one st)   ^ "KILL: {" ^ (string_of_var_list (kill (Node(st,p,s)) [])) ^ "}\n") nodes in
+  (String.concat "\n" s) ^ "\n"
 ;;
 
 let print_gen (nodes: nodeList) =
-  let s = List.map (function | Node(st, p, s) -> (string_of_stmt st)   ^ "GEN:" ^ (string_of_var_list (gen (Node(st,p,s))))) nodes in
-  String.concat "\n"  s
+  let s = List.map (function | Node(st, p, s) -> (string_of_stmt_one st)   ^ "GEN: {" ^ (string_of_var_list (gen (Node(st,p,s)))) ^ "}\n") nodes in
+  (String.concat "\n"  s) ^ "\n"
 ;;
 
 
@@ -385,37 +435,40 @@ let backwardDataflow (nodes: nodeList) =
     whileLoop workList nodes df
   ;;
 
-
-
-
-
-
-let final_cfg = (proc (cfg p));;
+let final_cfg = (proc (cfg p2));;
 
 print_string "Program: \n" ;;
 print_string "----------------------\n" ;;
-print_string (string_of_program p) ;;
+print_string (string_of_program p2) ;;
 print_string "----------------------\n" ;;
 
-print_string "CFG: \n" ;;
+print_string "\nCFG: \n" ;;
 print_string "----------------------\n" ;;
 print_string (string_of_cfg final_cfg) ;;
 print_string "----------------------\n" ;;
 
 (* let cfg = proc cfg p;;
  *)
-print_string "kill: \n";;
+print_string "\nKILL: \n";;
 print_string "----------------------\n" ;;
 print_string (print_kill final_cfg) ;;
 print_string "----------------------\n" ;;
 
 
-print_string "GEN: \n";;
+print_string "\nGEN: \n";;
 print_string "----------------------\n" ;;
 print_string (print_gen final_cfg) ;;
 print_string "----------------------\n" ;;
 
-print_string "DF: \n";;
+let dataflow = backwardDataflow final_cfg;;
+
+print_string "\nDataFlow: \n";;
 print_string "----------------------\n" ;;
-print_string (string_of_dataflow_nodes (backwardDataflow final_cfg)) ;;
+print_string (string_of_dataflow_nodes dataflow) ;;
 print_string "----------------------\n" ;;
+
+print_string "\nResult: \n";;
+print_string "----------------------\n" ;;
+print_string (string_of_res final_cfg dataflow) ;;
+print_string "----------------------\n" ;;
+
