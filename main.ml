@@ -1,3 +1,4 @@
+
 (* TYPES *)
 type const = Const of int
 and var = Var of string
@@ -145,6 +146,17 @@ let p = Program(CompStmt(
 ))
 ;;
 
+(*
+y := 4
+x := 2
+if(x - y)
+	z := y
+else
+	z := y * y
+end
+x := z
+*)
+
 let xeqasumb = AssignStmt(
    (Var("x")),
    (ArithExp(Add(Id(Var("a")), Id(Var("b")))))
@@ -179,57 +191,100 @@ let p2 = Program (CompStmt (
     yeqamulb, while1
     )
   ))
+(*
+x := a + b
+y := a * b
+while(y - a)
+	a := a * 2
+	x := a - b
+end
+*)
 
-let rec dataflowNode_of_node (n: node) (dfNodes: dataflowNode list)=
-  match dfNodes with
-    | [] -> raise ErrorNodeOfDfNode
-    | h :: tail -> match h with
-                    | DataFlowNode(nn, _, _) -> if n = nn then
-                                                h
-                                              else
-                                              dataflowNode_of_node n tail
-  ;;
-
-
-
-let rec string_of_pred (cfg: stmt list) =
-  match cfg with
-    | [] -> ""
-    | stmt :: tail -> "\t\t" ^ (string_of_stmt_one stmt) ^  (string_of_pred tail)
-  ;;
-
-
-let rec string_of_succ (cfg: stmt list) =
-  match cfg with
-    | [] -> ""
-    | stmt :: tail -> "\t\t" ^ (string_of_stmt_one stmt) ^  (string_of_succ tail)
-  ;;
-
-let rec string_of_cfg (cfg: nodeList) = 
-  match cfg with
-    | [] -> ""
-    | Node(stmt, pred, succ) :: tail ->  "\n" ^ (string_of_stmt_one stmt) ^ "\tPred:\n" ^ (string_of_pred pred) ^ "\tSucc:\n" ^ (string_of_succ succ) ^ (string_of_cfg tail)
-  ;;
-
-let live_variables = function
-  | DataFlowNode(_, ins, out) -> List.sort_uniq (fun x y -> compare x y) (ins @ out)
-  ;;
-
-let rec string_of_var_list (vars: var list) =
-  String.concat ", " (List.map (fun v -> string_of_var v) vars)
+let p3xeq1 = AssignStmt(
+   (Var("x")),
+   (Number(Const(1))))
 ;;
 
+let p3yeq1 = AssignStmt(
+   (Var("y")),
+   (Number(Const(1))))
+;;
 
-let rec string_of_res (cfg: nodeList) (dataflow: dataflowNode list) = 
-  match cfg with
-    | [] -> ""
-    | Node(stmt, pred, succ) :: tail ->  
-      let dfNode = dataflowNode_of_node (Node(stmt, pred, succ)) dataflow in
-      let liveVariables = live_variables dfNode in
-      (string_of_stmt_one stmt) ^
-       "\tLIVE: {" ^ (string_of_var_list liveVariables) ^ "}\n\n"
-       ^ (string_of_res tail dataflow)
-  ;;
+let p3if = IfStmt(
+   (ArithExp(Sub((Id(Var("x"))), (Id(Var("y")))))),
+   (PrintStmt (Id(Var("x")))),
+   (PrintStmt (Id(Var("y"))))
+   )
+;;
+
+let p3 = Program( CompStmt (
+  p3xeq1, CompStmt (
+    p3yeq1, p3if
+  )
+))
+;;
+
+(*
+x := 1
+y := 1
+if (x - y)
+  print(x)
+else
+  print(y)
+*)
+
+let p4xeq10 = AssignStmt(
+   (Var("x")),
+   (Number(Const(10))))
+;;
+
+let p4yeq10 = AssignStmt(
+   (Var("y")),
+   (Number(Const(10))))
+;;
+
+let p4yeqx = AssignStmt(
+   (Var("y")),
+   (ArithExp(Sub(Id(Var("x")), Number(Const(1))))))
+;;
+
+let p4zeqy = AssignStmt(
+   (Var("z")),
+   (ArithExp(Sub(Id(Var("y")), Number(Const(2))))))
+;;
+
+let while4 = WhileStmt(
+   (Id(Var("x"))),
+   (IfStmt (ArithExp(Div(Id(Var("x")), Number(Const(2)))), p4yeqx, p4zeqy))
+)
+;;
+
+let p4res = AssignStmt(
+   (Var("res")),
+   (ArithExp(Add(Id(Var("x")), ArithExp(Add(Id(Var("y")), Id(Var("z"))))))))
+;;
+
+let printRes4 = (PrintStmt (Id(Var("res"))))
+;;
+
+let p4 = Program (CompStmt(p4xeq10, CompStmt(
+  p4yeq10, CompStmt(while4, CompStmt(p4res, printRes4))
+)))
+;;
+
+(*
+x := 10
+y := 10
+while (x)
+  if (x / 2)
+    y := x - 1
+  else
+    z := y - 2
+  end
+end
+res := x + y + z
+print(res)
+*)
 
 let in_of_node = function
   | DataFlowNode(_, i, _) -> i
@@ -247,6 +302,56 @@ let stmt_of = function
   | Node(s, _, _) -> s
   ;;
 
+let succ_of = function
+  | Node(_, _, s) -> s
+  ;;
+
+let pred_of = function
+  | Node(_, p, _) -> p
+  ;;
+
+let diff l1 l2 = List.filter (fun x -> not (List.mem x l2)) l1
+;;
+
+let rec dataflowNode_of_node (n: node) (dfNodes: dataflowNode list)=
+  match dfNodes with
+    | [] -> raise ErrorNodeOfDfNode
+    | h :: tail -> match h with
+                    | DataFlowNode(nn, _, _) -> if n = nn then
+                                                h
+                                              else
+                                              dataflowNode_of_node n tail
+  ;;
+
+
+
+let rec string_of_pred (cfg: stmt list) =
+  match cfg with
+    | [] -> ""
+    | stmt :: tail -> "\t" ^ (string_of_stmt_one stmt) ^  (string_of_pred tail)
+  ;;
+
+
+let rec string_of_succ (cfg: stmt list) =
+  match cfg with
+    | [] -> ""
+    | stmt :: tail -> "\t" ^ (string_of_stmt_one stmt) ^  (string_of_succ tail)
+  ;;
+
+let rec string_of_cfg (cfg: nodeList) = 
+  match cfg with
+    | [] -> ""
+    | Node(stmt, pred, succ) :: tail ->  "\n" ^ (string_of_stmt_one stmt) ^ "\tPred:\n" ^ (string_of_pred pred) ^ "\tSucc:\n" ^ (string_of_succ succ) ^ (string_of_cfg tail)
+  ;;
+
+let live_variables = function
+  | DataFlowNode(_, ins, out) -> List.sort_uniq (fun x y -> compare x y) (ins @ out)
+  ;;
+
+let rec string_of_var_list (vars: var list) =
+  String.concat ", " (List.map (fun v -> string_of_var v) vars)
+;;
+
 let rec string_of_dataflow_nodes (nodes: dataflowNode list) =
   let s = List.map (fun n ->
     (string_of_stmt_one (stmt_of (node_of_dfNode n))) ^ "\tIN: {" ^ string_of_var_list (in_of_node n) ^ "} \n\tOUT: {" ^ string_of_var_list (out_of_node n) ^ "}"
@@ -254,25 +359,16 @@ let rec string_of_dataflow_nodes (nodes: dataflowNode list) =
   (String.concat "\n\n" s) ^ "\n"
   ;;
 
-let succ_of = function
-  | Node(_, _, s) -> s
+let rec string_of_res (cfg: nodeList) (dataflow: dataflowNode list) = 
+  match cfg with
+    | [] -> ""
+    | Node(stmt, pred, succ) :: tail ->  
+      let dfNode = dataflowNode_of_node (Node(stmt, pred, succ)) dataflow in
+      let liveVariables = live_variables dfNode in
+      (string_of_stmt_one stmt) ^
+       "\tLIVE: {" ^ (string_of_var_list liveVariables) ^ "}\n\n"
+       ^ (string_of_res tail dataflow)
   ;;
-
-(* let rec containsNull (stmts: stmt list) = 
-  match stms with
-    | [] -> false
-    | NullStmt :: t -> true
-    | _ :: t -> containsNull NullStmt
-  ;; *)
-
-let diff l1 l2 = List.filter (fun x -> not (List.mem x l2)) l1
-;;
-
-
-let pred_of = function
-  | Node(_, p, _) -> p
-  ;;
-
 
 let rec node_of_statement (s: stmt) (nodes: nodeList) =
   match nodes with
@@ -303,7 +399,6 @@ let rec statements_contain (s: stmt) (l: stmt list) =
   List.mem s l
   ;;
 
-
 let rec find_predecessors (s: stmt) (nodes: nodeList) =
   match nodes with
   | [] -> []
@@ -329,8 +424,6 @@ and hasId = function
   | ArithExp (exp) -> hasIdArithExp(exp)
 ;;
 
-
-
 let kill (currentNode: node) (defList: var list) =
   let stmt = stmt_of currentNode in
   match stmt with
@@ -348,8 +441,6 @@ let gen (currentNode: node)  =
     | CompStmt(_,_) -> raise Error
   ;;
 
-
-
 let print_kill (nodes: nodeList) =
   let s = List.map (function | Node(st, p, s) -> (string_of_stmt_one st)   ^ "\tKILL: {" ^ (string_of_var_list (kill (Node(st,p,s)) [])) ^ "}\n") nodes in
   (String.concat "\n" s) ^ "\n"
@@ -359,7 +450,6 @@ let print_gen (nodes: nodeList) =
   let s = List.map (function | Node(st, p, s) -> (string_of_stmt_one st)   ^ "\tGEN: {" ^ (string_of_var_list (gen (Node(st,p,s)))) ^ "}\n") nodes in
   (String.concat "\n"  s) ^ "\n"
 ;;
-
 
 let cfg (p: prg) =
   match p with
@@ -373,10 +463,9 @@ let rev list =
   aux [] list
   ;;
 
-
 let find_start_node (nodes: nodeList) =
   List.hd (List.filter (fun n -> List.length (pred_of n) == 0) nodes)
-
+  ;;
 
 let rec all_succ_of_node (n: node) (nodes: nodeList) =
   let succ = succ_of n in
@@ -427,19 +516,19 @@ let rec whileLoop  (workList: dataflowNode list) (nodes: nodeList) (allDfNodes: 
                 ;;
 
 let backwardDataflow (nodes: nodeList) =
-  let dfNodes = List.map (fun n -> DataFlowNode(n, [], [])) nodes in
-  let initial = List.filter (fun n -> statements_contain NullStmt (succ_of n)) nodes in
-  let initialDf = List.map (fun n -> DataFlowNode(n, (compute_in n []), [])) initial in
-  let df = List.flatten (List.map (fun n-> replaceNode n dfNodes) initialDf) in
-  let workList = (diff df initialDf) in
-    whileLoop workList nodes df
+  let initial = List.filter (fun n -> not (statements_contain NullStmt (succ_of n))) nodes in
+  let initialDf = List.map (fun n -> DataFlowNode(n, [], [])) initial in
+  let final = List.filter (fun n -> statements_contain NullStmt (succ_of n)) nodes in
+  let finalDf = List.map (fun n -> DataFlowNode(n, (compute_in n []), [])) final in
+  let workList = initialDf in
+    whileLoop workList nodes (initialDf @ finalDf)
   ;;
 
-let final_cfg = (proc (cfg p2));;
+let final_cfg = (proc (cfg p4));;
 
 print_string "Program: \n" ;;
 print_string "----------------------\n" ;;
-print_string (string_of_program p2) ;;
+print_string (string_of_program p4) ;;
 print_string "----------------------\n" ;;
 
 print_string "\nCFG: \n" ;;
@@ -471,4 +560,3 @@ print_string "\nResult: \n";;
 print_string "----------------------\n" ;;
 print_string (string_of_res final_cfg dataflow) ;;
 print_string "----------------------\n" ;;
-
